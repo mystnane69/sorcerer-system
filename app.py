@@ -13,13 +13,13 @@ warnings.filterwarnings("ignore")
 # Streamlit secrets (works on both platforms)
 # ─────────────────────────────────────────────
 def get_api_key():
-    # 1. Railway / any host: set ANTHROPIC_API_KEY in environment variables
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    # 1. Railway env variable
+    key = os.environ.get("GEMINI_API_KEY", "")
     if key:
         return key
-    # 2. Streamlit Cloud: set it in the Secrets manager
+    # 2. Streamlit secrets fallback
     try:
-        return st.secrets["ANTHROPIC_API_KEY"]
+        return st.secrets["GEMINI_API_KEY"]
     except Exception:
         return ""
 
@@ -78,7 +78,7 @@ def score_tier(score):
 # AI COMPARISON SUMMARY
 # ─────────────────────────────────────────────
 def generate_comparison_summary_ai(p1_data, p2_data, all_stats):
-    """Call Claude API — only used when ANTHROPIC_API_KEY is available."""
+    """Call Gemini API — only used when GEMINI_API_KEY is available."""
     import requests
 
     api_key = get_api_key()
@@ -109,24 +109,15 @@ Write your analysis in exactly this structure:
 Be direct, use specific numbers, write like a top analyst. Do not hedge. Each paragraph 3-5 sentences."""
 
     try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1200,
-                "messages": [{"role": "user", "content": prompt}]
-            },
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=30,
         )
         data = response.json()
-        if "content" in data and data["content"]:
-            return data["content"][0]["text"]
-        return None
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         return None
 
@@ -1139,7 +1130,7 @@ elif app_mode == "⚖️ Tactical Comparison":
             if has_key:
                 st.info("Click **⚡ Generate Analysis** to get an AI-written tactical breakdown of this matchup.")
             else:
-                st.info("Click **⚡ Generate Analysis** to get a stat-driven tactical breakdown. Add `ANTHROPIC_API_KEY` to your Railway variables to upgrade to full AI analysis.")
+                st.info("Click **⚡ Generate Analysis** to get a stat-driven tactical breakdown. Add `GEMINI_API_KEY` to your Railway variables to upgrade to full AI analysis.")
 
 
 # ─────────────────────────────────────────────

@@ -13,11 +13,11 @@ warnings.filterwarnings("ignore")
 # Streamlit secrets (works on both platforms)
 # ─────────────────────────────────────────────
 def get_api_key():
-    # 1. Railway env variable
+    # 1. Railway / any host: set GEMINI_API_KEY in environment variables
     key = os.environ.get("GEMINI_API_KEY", "")
     if key:
         return key
-    # 2. Streamlit secrets fallback
+    # 2. Streamlit Cloud: set it in the Secrets manager
     try:
         return st.secrets["GEMINI_API_KEY"]
     except Exception:
@@ -109,15 +109,24 @@ Write your analysis in exactly this structure:
 Be direct, use specific numbers, write like a top analyst. Do not hedge. Each paragraph 3-5 sentences."""
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         response = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 1200,
+                "messages": [{"role": "user", "content": prompt}]
+            },
             timeout=30,
         )
         data = response.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        if "content" in data and data["content"]:
+            return data["content"][0]["text"]
+        return None
     except Exception:
         return None
 
@@ -795,7 +804,8 @@ function setMode(m) {{
 </script>
 </body>
 </html>"""
-    st.components.v1.html(html, height=660, scrolling=False)
+    import streamlit.components.v1 as components
+    components.html(html, height=660, scrolling=False)
 
 
 # ─────────────────────────────────────────────
@@ -803,80 +813,200 @@ function setMode(m) {{
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def load_data():
+    """
+    Load player stats by scraping FBref directly via pandas.read_html().
+    This bypasses soccerdata entirely — no rate limiting issues.
+    Falls back to the CSV in your GitHub repo if scraping fails.
+    """
+    import time
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    # FBref Big 5 league stat URLs  (2024-25 season)
+    STAT_URLS = {
+        "passing":       "https://fbref.com/en/comps/Big5/passing/players/Big-5-European-Leagues-Stats",
+        "shot_creation": "https://fbref.com/en/comps/Big5/gca/players/Big-5-European-Leagues-Stats",
+        "possession":    "https://fbref.com/en/comps/Big5/possession/players/Big-5-European-Leagues-Stats",
+        "defense":       "https://fbref.com/en/comps/Big5/defense/players/Big-5-European-Leagues-Stats",
+    }
+
+    def scrape_table(url):
+        """Scrape a single FBref stat table, flatten multi-level columns."""
+        import requests as req
+        resp = req.get(url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        tables = pd.read_html(resp.text, header=[0, 1])
+        # FBref tables have a multi-level header — find the right one
+        for tbl in tables:
+            tbl.columns = [
+                f"{b}" if a.startswith("Unnamed") else f"{a}_{b}"
+                for a, b in tbl.columns
+            ]
+            # Drop repeated header rows embedded in data
+            tbl = tbl[tbl["Player"] != "Player"].copy()
+            if "Player" in tbl.columns and "90s" in " ".join(tbl.columns):
+                return tbl
+        return None
+
+    def safe_float(series):
+        return pd.to_numeric(series, errors="coerce").fillna(0.0)
+
+    def per90(series, nineties):
+        """Convert a counting stat to per-90 using 90s played."""
+        n = nineties.replace(0, np.nan)
+        return (safe_float(series) / n).fillna(0.0).round(3)
+
     try:
-        import soccerdata as sd
+        frames = {}
+        for name, url in STAT_URLS.items():
+            frames[name] = scrape_table(url)
+            time.sleep(4)   # be polite — FBref rate limits aggressive scrapers
+
+        passing  = frames["passing"]
+        shot_cr  = frames["shot_creation"]
+        possess  = frames["possession"]
+        defense  = frames["defense"]
+
+        if any(f is None for f in [passing, shot_cr, possess, defense]):
+            raise ValueError("One or more FBref tables failed to load")
+
+        # ── Helper: find column by fragment ──────────────────────────────
+        def col(df, fragment):
+            matches = [c for c in df.columns if fragment.lower() in c.lower()]
+            return matches[0] if matches else None
+
+        # ── Passing table ────────────────────────────────────────────────
+        p = passing.copy()
+        nineties = safe_float(p[col(p, "90s")] if col(p, "90s") else pd.Series([1]*len(p)))
+
+        df = pd.DataFrame()
+        df["Player_Name"] = p["Player"].str.strip()
+        df["Team"]        = p[col(p, "Squad")] if col(p, "Squad") else "Unknown"
+        df["Position"]    = p[col(p, "Pos")]   if col(p, "Pos")   else "MF"
+        df["League"]      = p[col(p, "Comp")]  if col(p, "Comp")  else "Unknown"
+        df["Minutes_Played"] = safe_float(p[col(p, "Min")] if col(p, "Min") else pd.Series([0]*len(p)))
+
+        # Filter to midfielders / fullbacks only
+        pos_filter = df["Position"].str.contains("MF|DF", na=False)
+        df = df[pos_filter].copy()
+        nineties = nineties[pos_filter].reset_index(drop=True)
+        p = p[pos_filter].reset_index(drop=True)
+
+        def pp(fragment):
+            c = col(p, fragment)
+            return per90(p[c], nineties) if c else pd.Series([0.0]*len(df))
+
+        df["Total_Passes_p90"]       = pp("Cmp")
+        df["Pass_Cmp_Pct"]           = safe_float(p[col(p, "Cmp%")] if col(p, "Cmp%") else pd.Series([0]*len(p)))
+        df["Prog_Passes_p90"]        = pp("PrgP")
+        df["Final_Third_Passes_p90"] = pp("1/3")
+        df["PPA_p90"]                = pp("PPA")
+        df["Through_Balls_p90"]      = pp("TB")
+        df["Key_Passes_p90"]         = pp("KP")
+        df["Long_Passes_Att_p90"]    = pp("Long")
+        df["Long_Pass_Cmp_Pct"]      = safe_float(p[col(p, "Long_Cmp%")] if col(p, "Long_Cmp%") else pd.Series([0]*len(p)))
+        df["Switches_p90"]           = pp("Sw")
+        df["Crosses_Att_p90"]        = pp("Crs")
+
+        # ── Shot creation table ──────────────────────────────────────────
+        sc = shot_cr.copy()
+        sc_idx = sc["Player"].str.strip().isin(df["Player_Name"])
+        sc = sc[sc_idx].reset_index(drop=True)
+
+        def scp(fragment, base_df=None):
+            bd = base_df if base_df is not None else sc
+            c = col(bd, fragment)
+            sc_n = safe_float(bd[col(bd, "90s")] if col(bd, "90s") else pd.Series([1]*len(bd)))
+            return per90(bd[c], sc_n) if c else pd.Series([0.0]*len(df))
+
+        # Merge SCA/GCA/xA/Assists by player name
+        sc_merged = df[["Player_Name"]].merge(
+            sc[["Player", col(sc,"SCA"), col(sc,"GCA"), col(sc,"xA") if col(sc,"xA") else "Player", col(sc,"Ast") if col(sc,"Ast") else "Player", col(sc,"90s")]].rename(columns={"Player":"Player_Name"}),
+            on="Player_Name", how="left"
+        )
+        sc_n90 = safe_float(sc_merged[col(sc,"90s")] if col(sc,"90s") else pd.Series([1]*len(df)))
+        df["SCA_p90"]      = per90(sc_merged[col(sc,"SCA")],  sc_n90) if col(sc,"SCA")  else 0.0
+        df["GCA_p90"]      = per90(sc_merged[col(sc,"GCA")],  sc_n90) if col(sc,"GCA")  else 0.0
+        df["xA_p90"]       = per90(sc_merged[col(sc,"xA")],   sc_n90) if col(sc,"xA")   else 0.0
+        df["Assists_p90"]  = per90(sc_merged[col(sc,"Ast")],  sc_n90) if col(sc,"Ast")  else 0.0
+
+        # ── Possession table ─────────────────────────────────────────────
+        pos = possess.copy()
+        pos_merged = df[["Player_Name"]].merge(
+            pos.rename(columns={"Player":"Player_Name"}),
+            on="Player_Name", how="left"
+        )
+        pos_n90 = safe_float(pos_merged[col(pos_merged,"90s")] if col(pos_merged,"90s") else pd.Series([1]*len(df)))
+        df["Prog_Carries_p90"]       = per90(pos_merged[col(pos_merged,"PrgC")],  pos_n90) if col(pos_merged,"PrgC") else 0.0
+        df["Carries_Final_Third_p90"]= per90(pos_merged[col(pos_merged,"1/3")],   pos_n90) if col(pos_merged,"1/3")  else 0.0
+        df["Carries_Pen_Area_p90"]   = per90(pos_merged[col(pos_merged,"CPA")],   pos_n90) if col(pos_merged,"CPA")  else 0.0
+
+        # ── Defense table ────────────────────────────────────────────────
+        dfs = defense.copy()
+        def_merged = df[["Player_Name"]].merge(
+            dfs.rename(columns={"Player":"Player_Name"}),
+            on="Player_Name", how="left"
+        )
+        def_n90 = safe_float(def_merged[col(def_merged,"90s")] if col(def_merged,"90s") else pd.Series([1]*len(df)))
+        df["Tackles_p90"]      = per90(def_merged[col(def_merged,"Tkl")],   def_n90) if col(def_merged,"Tkl")  else 0.0
+        df["Interceptions_p90"]= per90(def_merged[col(def_merged,"Int")],   def_n90) if col(def_merged,"Int")  else 0.0
+        df["Blocks_p90"]       = per90(def_merged[col(def_merged,"Blocks_Blocks")], def_n90) if col(def_merged,"Blocks_Blocks") else 0.0
+
+        # ── Derived stats ────────────────────────────────────────────────
+        df["Cross_Cmp_Pct"] = 0.0
+        df["Image_URL"]     = ""
+        df["Icons_URL"]     = ""
+
+        df["Passing_Efficiency_Ratio"] = (
+            (df["Prog_Passes_p90"] + 1.5 * df["Final_Third_Passes_p90"])
+            / df["Total_Passes_p90"].replace(0, np.nan)
+        ).fillna(0).round(3)
+
+        df["Sorcerer_Score"]   = df.apply(compute_sorcerer_score, axis=1)
+        df["Creativity_Index"] = df.apply(compute_creativity_index, axis=1)
+
+        # ── Clustering for Role Tags ─────────────────────────────────────
         from sklearn.preprocessing import StandardScaler
         from sklearn.cluster import KMeans
 
-        leagues = ["ENG-Premier League","ESP-La Liga","GER-Bundesliga","ITA-Serie A","FRA-Ligue 1"]
-        fbref = sd.FBref(leagues=leagues, seasons="2425")
-        passing = fbref.read_player_season_stats(stat_type="passing")
-        shot_cr = fbref.read_player_season_stats(stat_type="shot_creation")
-        carries = fbref.read_player_season_stats(stat_type="possession")
-        defense = fbref.read_player_season_stats(stat_type="defense")
-        for frame in [passing,shot_cr,carries,defense]:
-            frame.reset_index(inplace=True)
-        positions = ["MF","DF","FW,MF","MF,FW","DF,MF","MF,DF"]
-        passing = passing[passing["pos"].isin(positions)].copy()
-        merge_keys = ["player","team","pos","league","season"]
-        df = passing.copy()
-        for frame in [shot_cr,carries,defense]:
-            cols = [c for c in frame.columns if c not in df.columns or c in merge_keys]
-            valid_keys = [k for k in merge_keys if k in frame.columns and k in df.columns]
-            df = df.merge(frame[cols], on=valid_keys, how="left")
-        col_map = {
-            "player":"Player_Name","team":"Team","pos":"Position","league":"League",
-            "progressive_passes":"Prog_Passes_p90","passes_into_final_third":"Final_Third_Passes_p90",
-            "passes_into_penalty_area":"PPA_p90","through_balls":"Through_Balls_p90",
-            "key_passes":"Key_Passes_p90","passes_completed":"Total_Passes_p90",
-            "pass_cmp_pct":"Pass_Cmp_Pct","sca":"SCA_p90","gca":"GCA_p90",
-            "xa":"xA_p90","assists":"Assists_p90","progressive_carries":"Prog_Carries_p90",
-            "carries_into_final_third":"Carries_Final_Third_p90",
-            "carries_into_penalty_area":"Carries_Pen_Area_p90",
-            "passes_long":"Long_Passes_Att_p90","long_pass_cmp_pct":"Long_Pass_Cmp_Pct",
-            "switches":"Switches_p90","crosses":"Crosses_Att_p90",
-            "tackles":"Tackles_p90","interceptions":"Interceptions_p90",
-            "blocks":"Blocks_p90","minutes":"Minutes_Played",
-        }
-        df.rename(columns={k:v for k,v in col_map.items() if k in df.columns}, inplace=True)
-        for col in col_map.values():
-            if col not in df.columns: df[col] = 0.0
-        df["Cross_Cmp_Pct"]=0.0; df["Image_URL"]=""; df["Icons_URL"]=""
-        df["Passing_Efficiency_Ratio"] = (
-            (df["Prog_Passes_p90"]+1.5*df["Final_Third_Passes_p90"])
-            /df["Total_Passes_p90"].replace(0,np.nan)
-        ).fillna(0).round(3)
-        df["Sorcerer_Score"]   = df.apply(compute_sorcerer_score, axis=1)
-        df["Creativity_Index"] = df.apply(compute_creativity_index, axis=1)
         cluster_features = ["Prog_Passes_p90","SCA_p90","PPA_p90","Prog_Carries_p90",
                             "Tackles_p90","Interceptions_p90","Passing_Efficiency_Ratio","xA_p90"]
         X = df[cluster_features].fillna(0)
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.cluster import KMeans
-        scaler = StandardScaler()
+        scaler  = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
+        kmeans  = KMeans(n_clusters=5, random_state=42, n_init=10)
         df["cluster"] = kmeans.fit_predict(X_scaled)
         centers = pd.DataFrame(scaler.inverse_transform(kmeans.cluster_centers_), columns=cluster_features)
         role_map = {}
         for i, row in centers.iterrows():
-            if row["Tackles_p90"]>2.0 and row["SCA_p90"]<3.0: role_map[i]="Defensive Fullback"
-            elif row["Prog_Passes_p90"]>6.5 and row["SCA_p90"]>4.0: role_map[i]="Advanced Playmaker"
-            elif row["Prog_Carries_p90"]>5.0: role_map[i]="Carrying Wingback"
-            elif row["Passing_Efficiency_Ratio"]>0.11: role_map[i]="Wingback Creator"
-            else: role_map[i]="Possession Fullback"
+            if   row["Tackles_p90"] > 2.0 and row["SCA_p90"] < 3.0: role_map[i] = "Defensive Fullback"
+            elif row["Prog_Passes_p90"] > 6.5 and row["SCA_p90"] > 4.0: role_map[i] = "Advanced Playmaker"
+            elif row["Prog_Carries_p90"] > 5.0: role_map[i] = "Carrying Wingback"
+            elif row["Passing_Efficiency_Ratio"] > 0.11: role_map[i] = "Wingback Creator"
+            else: role_map[i] = "Possession Fullback"
         df["Role_Tag"] = df["cluster"].map(role_map)
-        df.drop(columns=["cluster"],inplace=True)
-        df = df[df["Sorcerer_Score"]>0].sort_values("Sorcerer_Score",ascending=False).reset_index(drop=True)
-        return df, True
-    except Exception:
-        try:
-            df = pd.read_csv("trent_sorcerer_stats.csv")
-            return df, False
-        except FileNotFoundError:
-            st.error("⚠️ Neither live data nor 'trent_sorcerer_stats.csv' could be loaded.")
-            st.stop()
+        df.drop(columns=["cluster"], inplace=True)
 
+        df = df[df["Sorcerer_Score"] > 0].sort_values("Sorcerer_Score", ascending=False).reset_index(drop=True)
+        df["Player_Name"] = df["Player_Name"].astype(str)
+        df = df.drop_duplicates(subset="Player_Name").reset_index(drop=True)
+        return df, True
+
+    except Exception as e:
+        # Fall back to GitHub-hosted CSV
+        try:
+            csv_url = "https://raw.githubusercontent.com/mystnane69/sorcerer-system/main/trent_sorcerer_stats.csv"
+            try:
+                df = pd.read_csv(csv_url)
+            except Exception:
+                df = pd.read_csv("trent_sorcerer_stats.csv")
+            return df, False
+        except Exception:
+            st.error("Neither live FBref data nor the CSV could be loaded. Check your GitHub repo has trent_sorcerer_stats.csv.")
+            st.stop()
 
 # ─────────────────────────────────────────────
 # LOAD

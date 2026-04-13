@@ -13,11 +13,11 @@ warnings.filterwarnings("ignore")
 # Streamlit secrets (works on both platforms)
 # ─────────────────────────────────────────────
 def get_api_key():
-    # 1. Railway / any host: set GEMINI_API_KEY in environment variables
+    # 1. Railway env variable
     key = os.environ.get("GEMINI_API_KEY", "")
     if key:
         return key
-    # 2. Streamlit Cloud: set it in the Secrets manager
+    # 2. Streamlit secrets fallback
     try:
         return st.secrets["GEMINI_API_KEY"]
     except Exception:
@@ -29,33 +29,154 @@ def get_api_key():
 st.set_page_config(
     page_title="Sorcerer System | Creativity Analytics",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
     <style>
-    .big-font {font-size: 50px !important; font-weight: 800; color: #4da6ff;}
-    .win-arrow {color: lime; font-weight: bold;}
-    .lose-arrow {color: red; font-weight: bold;}
-    .comp-table { width: 100%; text-align: left; border-collapse: collapse; margin-top: 20px;}
-    .comp-table th { padding: 12px; border-bottom: 2px solid #4da6ff; font-size: 18px; background-color: #111111; position: sticky; top: 0;}
-    .comp-table td { padding: 12px; border-bottom: 1px solid #333; font-size: 16px; }
+    /* ── MOBILE-FIRST BASE ── */
+    html, body, [class*="css"] { -webkit-tap-highlight-color: transparent; }
+
+    /* Sidebar — full width on mobile, normal on desktop */
+    [data-testid="stSidebar"] {
+        min-width: 260px !important;
+    }
+    @media (max-width: 768px) {
+        [data-testid="stSidebar"] { min-width: 85vw !important; max-width: 85vw !important; }
+        [data-testid="stSidebarNav"] { font-size: 18px !important; }
+        /* Bigger tap targets for sidebar radio */
+        [data-testid="stSidebar"] label { padding: 10px 0 !important; font-size: 16px !important; }
+    }
+
+    /* Main content padding on mobile */
+    @media (max-width: 768px) {
+        .block-container { padding: 1rem 0.75rem 2rem !important; }
+        h1 { font-size: 1.6rem !important; }
+        h2 { font-size: 1.3rem !important; }
+        h3 { font-size: 1.1rem !important; }
+    }
+
+    /* ── TITLE ── */
+    .big-font {
+        font-size: clamp(28px, 8vw, 52px) !important;
+        font-weight: 800;
+        color: #4da6ff;
+        line-height: 1.1;
+    }
+
+    /* ── ARROWS ── */
+    .win-arrow  { color: lime; font-weight: bold; }
+    .lose-arrow { color: red;  font-weight: bold; }
+
+    /* ── COMPARISON TABLE — scrollable on mobile ── */
+    .table-scroll-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 8px;
+        margin-top: 12px;
+    }
+    .comp-table { width: 100%; text-align: left; border-collapse: collapse; min-width: 340px; }
+    .comp-table th {
+        padding: 10px 8px;
+        border-bottom: 2px solid #4da6ff;
+        font-size: clamp(13px, 3vw, 16px);
+        background-color: #111111;
+        position: sticky;
+        top: 0;
+        white-space: nowrap;
+    }
+    .comp-table td {
+        padding: 9px 8px;
+        border-bottom: 1px solid #333;
+        font-size: clamp(12px, 2.8vw, 15px);
+        white-space: nowrap;
+    }
     .comp-table tr:hover { background-color: #1a1a1a; }
-    .score-excellent { background: linear-gradient(90deg, #1a3a1a, #0d0d0d); border-left: 5px solid #00e676; padding: 14px 20px; border-radius: 8px; display: inline-block; min-width: 200px;}
-    .score-good      { background: linear-gradient(90deg, #1a2e3a, #0d0d0d); border-left: 5px solid #4da6ff; padding: 14px 20px; border-radius: 8px; display: inline-block; min-width: 200px;}
-    .score-average   { background: linear-gradient(90deg, #2e2a0d, #0d0d0d); border-left: 5px solid #ffc107; padding: 14px 20px; border-radius: 8px; display: inline-block; min-width: 200px;}
-    .score-poor      { background: linear-gradient(90deg, #3a1a1a, #0d0d0d); border-left: 5px solid #ff5252; padding: 14px 20px; border-radius: 8px; display: inline-block; min-width: 200px;}
-    .score-label { font-size: 13px; color: #aaa; margin-bottom: 4px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;}
-    .score-value { font-size: 32px; font-weight: 900; }
-    .score-tag   { font-size: 12px; margin-top: 4px; font-weight: 700; letter-spacing: 1px; }
-    .fact-box { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px 20px; margin-bottom: 10px; }
-    .fact-icon { font-size: 20px; margin-right: 8px; }
-    .fact-text { font-size: 15px; color: #d1d5db; line-height: 1.5; }
+
+    /* ── SCORE CARDS ── */
+    .score-excellent { background: linear-gradient(90deg, #1a3a1a, #0d0d0d); border-left: 5px solid #00e676; padding: 12px 16px; border-radius: 8px; display: block; width: 100%; box-sizing: border-box; margin-bottom: 8px;}
+    .score-good      { background: linear-gradient(90deg, #1a2e3a, #0d0d0d); border-left: 5px solid #4da6ff; padding: 12px 16px; border-radius: 8px; display: block; width: 100%; box-sizing: border-box; margin-bottom: 8px;}
+    .score-average   { background: linear-gradient(90deg, #2e2a0d, #0d0d0d); border-left: 5px solid #ffc107; padding: 12px 16px; border-radius: 8px; display: block; width: 100%; box-sizing: border-box; margin-bottom: 8px;}
+    .score-poor      { background: linear-gradient(90deg, #3a1a1a, #0d0d0d); border-left: 5px solid #ff5252; padding: 12px 16px; border-radius: 8px; display: block; width: 100%; box-sizing: border-box; margin-bottom: 8px;}
+    .score-label { font-size: 11px; color: #aaa; margin-bottom: 4px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;}
+    .score-value { font-size: clamp(22px, 6vw, 32px); font-weight: 900; }
+    .score-tag   { font-size: 11px; margin-top: 4px; font-weight: 700; letter-spacing: 1px; }
+
+    /* ── FACT BOXES ── */
+    .fact-box {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+    }
+    .fact-icon  { font-size: 18px; margin-right: 8px; }
+    .fact-text  { font-size: clamp(13px, 3.5vw, 15px); color: #d1d5db; line-height: 1.6; }
     .fact-badge { display: inline-block; background: #1e3a5f; color: #60a5fa; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
-    .summary-box { background: #0d1117; border: 1.5px solid #4da6ff; border-radius: 14px; padding: 24px 28px; margin-top: 20px; }
-    .summary-box h3 { color: #4da6ff; font-size: 18px; margin-bottom: 16px; }
-    .summary-box p { color: #c9d1d9; font-size: 15px; line-height: 1.8; margin-bottom: 12px; }
-    .summary-verdict { background: #161b22; border-left: 4px solid #00e676; border-radius: 6px; padding: 14px 18px; margin-top: 16px; color: #e6edf3; font-size: 15px; line-height: 1.7; font-style: italic; }
+
+    /* ── SUMMARY BOX ── */
+    .summary-box {
+        background: #0d1117;
+        border: 1.5px solid #4da6ff;
+        border-radius: 14px;
+        padding: clamp(14px, 4vw, 24px) clamp(12px, 4vw, 28px);
+        margin-top: 16px;
+    }
+    .summary-box h3 { color: #4da6ff; font-size: clamp(15px, 4vw, 18px); margin-bottom: 14px; }
+    .summary-box p  { color: #c9d1d9; font-size: clamp(13px, 3.5vw, 15px); line-height: 1.8; margin-bottom: 12px; }
+    .summary-verdict {
+        background: #161b22;
+        border-left: 4px solid #00e676;
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-top: 14px;
+        color: #e6edf3;
+        font-size: clamp(13px, 3.5vw, 15px);
+        line-height: 1.7;
+        font-style: italic;
+    }
+
+    /* ── BUTTONS — bigger tap targets ── */
+    @media (max-width: 768px) {
+        .stButton > button {
+            width: 100% !important;
+            padding: 12px 8px !important;
+            font-size: 15px !important;
+            border-radius: 10px !important;
+            margin-bottom: 6px !important;
+        }
+        /* Selectboxes */
+        .stSelectbox > div > div { font-size: 15px !important; min-height: 46px !important; }
+        /* Metrics — smaller font */
+        [data-testid="metric-container"] { padding: 8px 6px !important; }
+        [data-testid="metric-container"] label { font-size: 11px !important; }
+        [data-testid="metric-container"] [data-testid="stMetricValue"] { font-size: 18px !important; }
+        /* Tabs */
+        .stTabs [data-baseweb="tab"] { font-size: 12px !important; padding: 6px 8px !important; }
+        /* Dataframe */
+        .stDataFrame { font-size: 12px !important; }
+        /* Expander */
+        .streamlit-expanderHeader { font-size: 15px !important; padding: 12px 8px !important; }
+    }
+
+    /* ── PLOTLY CHARTS — ensure they don't overflow ── */
+    .js-plotly-plot { max-width: 100% !important; }
+
+    /* ── MOBILE NAV HELPER ── */
+    .mobile-nav-hint {
+        display: none;
+        background: #1a1a2e;
+        border: 1px solid #4da6ff33;
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 16px;
+        color: #8899aa;
+        font-size: 13px;
+        text-align: center;
+    }
+    @media (max-width: 768px) {
+        .mobile-nav-hint { display: block; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -109,24 +230,15 @@ Write your analysis in exactly this structure:
 Be direct, use specific numbers, write like a top analyst. Do not hedge. Each paragraph 3-5 sentences."""
 
     try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1200,
-                "messages": [{"role": "user", "content": prompt}]
-            },
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=30,
         )
         data = response.json()
-        if "content" in data and data["content"]:
-            return data["content"][0]["text"]
-        return None
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         return None
 
@@ -804,8 +916,7 @@ function setMode(m) {{
 </script>
 </body>
 </html>"""
-    import streamlit.components.v1 as components
-    components.html(html, height=660, scrolling=False)
+    st.components.v1.html(html, height=660, scrolling=False)
 
 
 # ─────────────────────────────────────────────
@@ -813,200 +924,80 @@ function setMode(m) {{
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def load_data():
-    """
-    Load player stats by scraping FBref directly via pandas.read_html().
-    This bypasses soccerdata entirely — no rate limiting issues.
-    Falls back to the CSV in your GitHub repo if scraping fails.
-    """
-    import time
-
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-
-    # FBref Big 5 league stat URLs  (2024-25 season)
-    STAT_URLS = {
-        "passing":       "https://fbref.com/en/comps/Big5/passing/players/Big-5-European-Leagues-Stats",
-        "shot_creation": "https://fbref.com/en/comps/Big5/gca/players/Big-5-European-Leagues-Stats",
-        "possession":    "https://fbref.com/en/comps/Big5/possession/players/Big-5-European-Leagues-Stats",
-        "defense":       "https://fbref.com/en/comps/Big5/defense/players/Big-5-European-Leagues-Stats",
-    }
-
-    def scrape_table(url):
-        """Scrape a single FBref stat table, flatten multi-level columns."""
-        import requests as req
-        resp = req.get(url, headers=HEADERS, timeout=20)
-        resp.raise_for_status()
-        tables = pd.read_html(resp.text, header=[0, 1])
-        # FBref tables have a multi-level header — find the right one
-        for tbl in tables:
-            tbl.columns = [
-                f"{b}" if a.startswith("Unnamed") else f"{a}_{b}"
-                for a, b in tbl.columns
-            ]
-            # Drop repeated header rows embedded in data
-            tbl = tbl[tbl["Player"] != "Player"].copy()
-            if "Player" in tbl.columns and "90s" in " ".join(tbl.columns):
-                return tbl
-        return None
-
-    def safe_float(series):
-        return pd.to_numeric(series, errors="coerce").fillna(0.0)
-
-    def per90(series, nineties):
-        """Convert a counting stat to per-90 using 90s played."""
-        n = nineties.replace(0, np.nan)
-        return (safe_float(series) / n).fillna(0.0).round(3)
-
     try:
-        frames = {}
-        for name, url in STAT_URLS.items():
-            frames[name] = scrape_table(url)
-            time.sleep(4)   # be polite — FBref rate limits aggressive scrapers
-
-        passing  = frames["passing"]
-        shot_cr  = frames["shot_creation"]
-        possess  = frames["possession"]
-        defense  = frames["defense"]
-
-        if any(f is None for f in [passing, shot_cr, possess, defense]):
-            raise ValueError("One or more FBref tables failed to load")
-
-        # ── Helper: find column by fragment ──────────────────────────────
-        def col(df, fragment):
-            matches = [c for c in df.columns if fragment.lower() in c.lower()]
-            return matches[0] if matches else None
-
-        # ── Passing table ────────────────────────────────────────────────
-        p = passing.copy()
-        nineties = safe_float(p[col(p, "90s")] if col(p, "90s") else pd.Series([1]*len(p)))
-
-        df = pd.DataFrame()
-        df["Player_Name"] = p["Player"].str.strip()
-        df["Team"]        = p[col(p, "Squad")] if col(p, "Squad") else "Unknown"
-        df["Position"]    = p[col(p, "Pos")]   if col(p, "Pos")   else "MF"
-        df["League"]      = p[col(p, "Comp")]  if col(p, "Comp")  else "Unknown"
-        df["Minutes_Played"] = safe_float(p[col(p, "Min")] if col(p, "Min") else pd.Series([0]*len(p)))
-
-        # Filter to midfielders / fullbacks only
-        pos_filter = df["Position"].str.contains("MF|DF", na=False)
-        df = df[pos_filter].copy()
-        nineties = nineties[pos_filter].reset_index(drop=True)
-        p = p[pos_filter].reset_index(drop=True)
-
-        def pp(fragment):
-            c = col(p, fragment)
-            return per90(p[c], nineties) if c else pd.Series([0.0]*len(df))
-
-        df["Total_Passes_p90"]       = pp("Cmp")
-        df["Pass_Cmp_Pct"]           = safe_float(p[col(p, "Cmp%")] if col(p, "Cmp%") else pd.Series([0]*len(p)))
-        df["Prog_Passes_p90"]        = pp("PrgP")
-        df["Final_Third_Passes_p90"] = pp("1/3")
-        df["PPA_p90"]                = pp("PPA")
-        df["Through_Balls_p90"]      = pp("TB")
-        df["Key_Passes_p90"]         = pp("KP")
-        df["Long_Passes_Att_p90"]    = pp("Long")
-        df["Long_Pass_Cmp_Pct"]      = safe_float(p[col(p, "Long_Cmp%")] if col(p, "Long_Cmp%") else pd.Series([0]*len(p)))
-        df["Switches_p90"]           = pp("Sw")
-        df["Crosses_Att_p90"]        = pp("Crs")
-
-        # ── Shot creation table ──────────────────────────────────────────
-        sc = shot_cr.copy()
-        sc_idx = sc["Player"].str.strip().isin(df["Player_Name"])
-        sc = sc[sc_idx].reset_index(drop=True)
-
-        def scp(fragment, base_df=None):
-            bd = base_df if base_df is not None else sc
-            c = col(bd, fragment)
-            sc_n = safe_float(bd[col(bd, "90s")] if col(bd, "90s") else pd.Series([1]*len(bd)))
-            return per90(bd[c], sc_n) if c else pd.Series([0.0]*len(df))
-
-        # Merge SCA/GCA/xA/Assists by player name
-        sc_merged = df[["Player_Name"]].merge(
-            sc[["Player", col(sc,"SCA"), col(sc,"GCA"), col(sc,"xA") if col(sc,"xA") else "Player", col(sc,"Ast") if col(sc,"Ast") else "Player", col(sc,"90s")]].rename(columns={"Player":"Player_Name"}),
-            on="Player_Name", how="left"
-        )
-        sc_n90 = safe_float(sc_merged[col(sc,"90s")] if col(sc,"90s") else pd.Series([1]*len(df)))
-        df["SCA_p90"]      = per90(sc_merged[col(sc,"SCA")],  sc_n90) if col(sc,"SCA")  else 0.0
-        df["GCA_p90"]      = per90(sc_merged[col(sc,"GCA")],  sc_n90) if col(sc,"GCA")  else 0.0
-        df["xA_p90"]       = per90(sc_merged[col(sc,"xA")],   sc_n90) if col(sc,"xA")   else 0.0
-        df["Assists_p90"]  = per90(sc_merged[col(sc,"Ast")],  sc_n90) if col(sc,"Ast")  else 0.0
-
-        # ── Possession table ─────────────────────────────────────────────
-        pos = possess.copy()
-        pos_merged = df[["Player_Name"]].merge(
-            pos.rename(columns={"Player":"Player_Name"}),
-            on="Player_Name", how="left"
-        )
-        pos_n90 = safe_float(pos_merged[col(pos_merged,"90s")] if col(pos_merged,"90s") else pd.Series([1]*len(df)))
-        df["Prog_Carries_p90"]       = per90(pos_merged[col(pos_merged,"PrgC")],  pos_n90) if col(pos_merged,"PrgC") else 0.0
-        df["Carries_Final_Third_p90"]= per90(pos_merged[col(pos_merged,"1/3")],   pos_n90) if col(pos_merged,"1/3")  else 0.0
-        df["Carries_Pen_Area_p90"]   = per90(pos_merged[col(pos_merged,"CPA")],   pos_n90) if col(pos_merged,"CPA")  else 0.0
-
-        # ── Defense table ────────────────────────────────────────────────
-        dfs = defense.copy()
-        def_merged = df[["Player_Name"]].merge(
-            dfs.rename(columns={"Player":"Player_Name"}),
-            on="Player_Name", how="left"
-        )
-        def_n90 = safe_float(def_merged[col(def_merged,"90s")] if col(def_merged,"90s") else pd.Series([1]*len(df)))
-        df["Tackles_p90"]      = per90(def_merged[col(def_merged,"Tkl")],   def_n90) if col(def_merged,"Tkl")  else 0.0
-        df["Interceptions_p90"]= per90(def_merged[col(def_merged,"Int")],   def_n90) if col(def_merged,"Int")  else 0.0
-        df["Blocks_p90"]       = per90(def_merged[col(def_merged,"Blocks_Blocks")], def_n90) if col(def_merged,"Blocks_Blocks") else 0.0
-
-        # ── Derived stats ────────────────────────────────────────────────
-        df["Cross_Cmp_Pct"] = 0.0
-        df["Image_URL"]     = ""
-        df["Icons_URL"]     = ""
-
-        df["Passing_Efficiency_Ratio"] = (
-            (df["Prog_Passes_p90"] + 1.5 * df["Final_Third_Passes_p90"])
-            / df["Total_Passes_p90"].replace(0, np.nan)
-        ).fillna(0).round(3)
-
-        df["Sorcerer_Score"]   = df.apply(compute_sorcerer_score, axis=1)
-        df["Creativity_Index"] = df.apply(compute_creativity_index, axis=1)
-
-        # ── Clustering for Role Tags ─────────────────────────────────────
+        import soccerdata as sd
         from sklearn.preprocessing import StandardScaler
         from sklearn.cluster import KMeans
 
+        leagues = ["ENG-Premier League","ESP-La Liga","GER-Bundesliga","ITA-Serie A","FRA-Ligue 1"]
+        fbref = sd.FBref(leagues=leagues, seasons="2425")
+        passing = fbref.read_player_season_stats(stat_type="passing")
+        shot_cr = fbref.read_player_season_stats(stat_type="shot_creation")
+        carries = fbref.read_player_season_stats(stat_type="possession")
+        defense = fbref.read_player_season_stats(stat_type="defense")
+        for frame in [passing,shot_cr,carries,defense]:
+            frame.reset_index(inplace=True)
+        positions = ["MF","DF","FW,MF","MF,FW","DF,MF","MF,DF"]
+        passing = passing[passing["pos"].isin(positions)].copy()
+        merge_keys = ["player","team","pos","league","season"]
+        df = passing.copy()
+        for frame in [shot_cr,carries,defense]:
+            cols = [c for c in frame.columns if c not in df.columns or c in merge_keys]
+            valid_keys = [k for k in merge_keys if k in frame.columns and k in df.columns]
+            df = df.merge(frame[cols], on=valid_keys, how="left")
+        col_map = {
+            "player":"Player_Name","team":"Team","pos":"Position","league":"League",
+            "progressive_passes":"Prog_Passes_p90","passes_into_final_third":"Final_Third_Passes_p90",
+            "passes_into_penalty_area":"PPA_p90","through_balls":"Through_Balls_p90",
+            "key_passes":"Key_Passes_p90","passes_completed":"Total_Passes_p90",
+            "pass_cmp_pct":"Pass_Cmp_Pct","sca":"SCA_p90","gca":"GCA_p90",
+            "xa":"xA_p90","assists":"Assists_p90","progressive_carries":"Prog_Carries_p90",
+            "carries_into_final_third":"Carries_Final_Third_p90",
+            "carries_into_penalty_area":"Carries_Pen_Area_p90",
+            "passes_long":"Long_Passes_Att_p90","long_pass_cmp_pct":"Long_Pass_Cmp_Pct",
+            "switches":"Switches_p90","crosses":"Crosses_Att_p90",
+            "tackles":"Tackles_p90","interceptions":"Interceptions_p90",
+            "blocks":"Blocks_p90","minutes":"Minutes_Played",
+        }
+        df.rename(columns={k:v for k,v in col_map.items() if k in df.columns}, inplace=True)
+        for col in col_map.values():
+            if col not in df.columns: df[col] = 0.0
+        df["Cross_Cmp_Pct"]=0.0; df["Image_URL"]=""; df["Icons_URL"]=""
+        df["Passing_Efficiency_Ratio"] = (
+            (df["Prog_Passes_p90"]+1.5*df["Final_Third_Passes_p90"])
+            /df["Total_Passes_p90"].replace(0,np.nan)
+        ).fillna(0).round(3)
+        df["Sorcerer_Score"]   = df.apply(compute_sorcerer_score, axis=1)
+        df["Creativity_Index"] = df.apply(compute_creativity_index, axis=1)
         cluster_features = ["Prog_Passes_p90","SCA_p90","PPA_p90","Prog_Carries_p90",
                             "Tackles_p90","Interceptions_p90","Passing_Efficiency_Ratio","xA_p90"]
         X = df[cluster_features].fillna(0)
-        scaler  = StandardScaler()
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.cluster import KMeans
+        scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        kmeans  = KMeans(n_clusters=5, random_state=42, n_init=10)
+        kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
         df["cluster"] = kmeans.fit_predict(X_scaled)
         centers = pd.DataFrame(scaler.inverse_transform(kmeans.cluster_centers_), columns=cluster_features)
         role_map = {}
         for i, row in centers.iterrows():
-            if   row["Tackles_p90"] > 2.0 and row["SCA_p90"] < 3.0: role_map[i] = "Defensive Fullback"
-            elif row["Prog_Passes_p90"] > 6.5 and row["SCA_p90"] > 4.0: role_map[i] = "Advanced Playmaker"
-            elif row["Prog_Carries_p90"] > 5.0: role_map[i] = "Carrying Wingback"
-            elif row["Passing_Efficiency_Ratio"] > 0.11: role_map[i] = "Wingback Creator"
-            else: role_map[i] = "Possession Fullback"
+            if row["Tackles_p90"]>2.0 and row["SCA_p90"]<3.0: role_map[i]="Defensive Fullback"
+            elif row["Prog_Passes_p90"]>6.5 and row["SCA_p90"]>4.0: role_map[i]="Advanced Playmaker"
+            elif row["Prog_Carries_p90"]>5.0: role_map[i]="Carrying Wingback"
+            elif row["Passing_Efficiency_Ratio"]>0.11: role_map[i]="Wingback Creator"
+            else: role_map[i]="Possession Fullback"
         df["Role_Tag"] = df["cluster"].map(role_map)
-        df.drop(columns=["cluster"], inplace=True)
-
-        df = df[df["Sorcerer_Score"] > 0].sort_values("Sorcerer_Score", ascending=False).reset_index(drop=True)
-        df["Player_Name"] = df["Player_Name"].astype(str)
-        df = df.drop_duplicates(subset="Player_Name").reset_index(drop=True)
+        df.drop(columns=["cluster"],inplace=True)
+        df = df[df["Sorcerer_Score"]>0].sort_values("Sorcerer_Score",ascending=False).reset_index(drop=True)
         return df, True
-
-    except Exception as e:
-        # Fall back to GitHub-hosted CSV
+    except Exception:
         try:
-            csv_url = "https://raw.githubusercontent.com/mystnane69/sorcerer-system/main/trent_sorcerer_stats.csv"
-            try:
-                df = pd.read_csv(csv_url)
-            except Exception:
-                df = pd.read_csv("trent_sorcerer_stats.csv")
+            df = pd.read_csv("trent_sorcerer_stats.csv")
             return df, False
-        except Exception:
-            st.error("Neither live FBref data nor the CSV could be loaded. Check your GitHub repo has trent_sorcerer_stats.csv.")
+        except FileNotFoundError:
+            st.error("⚠️ Neither live data nor 'trent_sorcerer_stats.csv' could be loaded.")
             st.stop()
+
 
 # ─────────────────────────────────────────────
 # LOAD
@@ -1039,13 +1030,17 @@ if is_live and st.sidebar.button("🔄 Refresh Live Data"):
 # ─────────────────────────────────────────────
 # MODE 1: HOME SCREEN
 # ─────────────────────────────────────────────
+# Mobile navigation hint
+st.markdown("<div class='mobile-nav-hint'>☰ Tap the arrow at top-left to navigate between sections</div>", unsafe_allow_html=True)
+
 if app_mode == "🏠 Home Screen":
     st.markdown('<p class="big-font">The Sorcerer System</p>', unsafe_allow_html=True)
     st.subheader("Elite Playmaker & Fullback Tactical Profiling Dashboard")
     st.markdown("---")
-    col1,col2,col3,col4 = st.columns(4)
+    col1,col2 = st.columns(2)
     with col1: st.metric("Players Tracked", len(df))
     with col2: st.metric("Metrics Analyzed", len(numeric_cols))
+    col3,col4 = st.columns(2)
     with col3:
         top_s = df.loc[df["Sorcerer_Score"].idxmax()]
         st.metric("Highest Sorcerer Score", top_s["Sorcerer_Score"], delta=top_s["Player_Name"])
@@ -1063,7 +1058,7 @@ if app_mode == "🏠 Home Screen":
     fig_bar = px.bar(bar_df, x="Sorcerer_Score", y="Player_Name", color="Role_Tag", orientation="h",
                      template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Pastel,
                      hover_data=["Team","Position","Creativity_Index"])
-    fig_bar.update_layout(height=max(600, len(df)*26), yaxis_title="", xaxis_title="Sorcerer Score")
+    fig_bar.update_layout(height=max(500, len(df)*22), yaxis_title="", xaxis_title="Sorcerer Score", font=dict(size=11), margin=dict(l=10, r=10, t=20, b=20))
     st.plotly_chart(fig_bar, use_container_width=True)
 
 
@@ -1079,9 +1074,10 @@ elif app_mode == "📖 The Sorcerer Formula":
     st.markdown("---")
     st.subheader("🎚️ Score Tier Thresholds")
     st.caption("Thresholds derived from actual data: 25th pct = 1.21, median = 1.56, 75th pct = 2.47")
-    tc1,tc2,tc3,tc4 = st.columns(4)
+    tc1,tc2 = st.columns(2)
     tc1.markdown("<div class='score-poor'><div class='score-label'>Poor</div><div class='score-value' style='color:#ff5252'>< 1.21</div><div class='score-tag' style='color:#ff5252'>BOTTOM 25%</div></div>", unsafe_allow_html=True)
     tc2.markdown("<div class='score-average'><div class='score-label'>Average</div><div class='score-value' style='color:#ffc107'>1.21 – 1.99</div><div class='score-tag' style='color:#ffc107'>MID RANGE</div></div>", unsafe_allow_html=True)
+    tc3,tc4 = st.columns(2)
     tc3.markdown("<div class='score-good'><div class='score-label'>Good</div><div class='score-value' style='color:#4da6ff'>2.00 – 2.74</div><div class='score-tag' style='color:#4da6ff'>ABOVE AVERAGE</div></div>", unsafe_allow_html=True)
     tc4.markdown("<div class='score-excellent'><div class='score-label'>Excellent</div><div class='score-value' style='color:#00e676'>≥ 2.75</div><div class='score-tag' style='color:#00e676'>TOP 25%</div></div>", unsafe_allow_html=True)
     st.markdown("---")
@@ -1184,7 +1180,7 @@ elif app_mode == "⚖️ Tactical Comparison":
             label = m.replace("_p90"," (p90)").replace("_"," ").title().replace("Pct","%")
             table_html += f"<tr><td style='font-weight:bold;color:#e0e0e0'>{label}</td><td>{c1}</td><td>{c2}</td></tr>\n"
         table_html += "</table>"
-        st.markdown(table_html, unsafe_allow_html=True)
+        st.markdown(f"<div class='table-scroll-wrap'>{table_html}</div>", unsafe_allow_html=True)
 
         # Radar
         st.markdown("---")
@@ -1198,7 +1194,7 @@ elif app_mode == "⚖️ Tactical Comparison":
                 r=[pd_[m] for m in radar_metrics],
                 theta=radar_labels, fill="toself", name=player
             ))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True)), template="plotly_dark", height=520, showlegend=True)
+        fig.update_layout(polar=dict(radialaxis=dict(visible=True)), template="plotly_dark", height=400, showlegend=True, margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig, use_container_width=True)
 
         # ── TACTICAL SUMMARY ──
@@ -1210,7 +1206,7 @@ elif app_mode == "⚖️ Tactical Comparison":
         if cache_key not in st.session_state:
             st.session_state[cache_key] = None
 
-        col_gen1, col_gen2, _ = st.columns([1.5, 1.5, 5])
+        col_gen1, col_gen2 = st.columns(2)
         with col_gen1:
             generate_btn = st.button("⚡ Generate Analysis", type="primary")
         with col_gen2:
@@ -1309,26 +1305,30 @@ elif app_mode == "🧠 Creative Profiles":
                 st.markdown("---")
                 tab1,tab2,tab3,tab4 = st.tabs(["🎯 Danger Zone","🚀 Progression & Passing","🏃 Ball Carrying","🛡️ Defense"])
                 with tab1:
-                    c1,c2,c3,c4 = st.columns(4)
+                    c1,c2 = st.columns(2)
                     c1.metric("SCA p90", p["SCA_p90"]); c2.metric("GCA p90", p["GCA_p90"])
+                    c3,c4 = st.columns(2)
                     c3.metric("PPA p90", p["PPA_p90"]); c4.metric("Through Balls", p["Through_Balls_p90"])
-                    c5,c6,c7,c8 = st.columns(4)
+                    c5,c6 = st.columns(2)
                     c5.metric("Key Passes", p["Key_Passes_p90"]); c6.metric("xA", p["xA_p90"])
+                    c7,c8 = st.columns(2)
                     c7.metric("Assists", p["Assists_p90"]); c8.metric("Crosses Att.", p["Crosses_Att_p90"])
                 with tab2:
-                    c1,c2,c3,c4 = st.columns(4)
+                    c1,c2 = st.columns(2)
                     c1.metric("Prog Passes", p["Prog_Passes_p90"]); c2.metric("Final 3rd Passes", p["Final_Third_Passes_p90"])
+                    c3,c4 = st.columns(2)
                     c3.metric("Total Passes", p["Total_Passes_p90"]); c4.metric("Pass Cmp %", f"{p['Pass_Cmp_Pct']}%")
-                    c5,c6,c7,c8 = st.columns(4)
+                    c5,c6 = st.columns(2)
                     c5.metric("Long Passes Att.", p["Long_Passes_Att_p90"]); c6.metric("Long Pass Cmp %", f"{p['Long_Pass_Cmp_Pct']}%")
+                    c7,c8 = st.columns(2)
                     c7.metric("Switches", p["Switches_p90"]); c8.metric("Efficiency Ratio", p["Passing_Efficiency_Ratio"])
                 with tab3:
-                    c1,c2,c3 = st.columns(3)
+                    c1,c2 = st.columns(2)
                     c1.metric("Prog Carries", p["Prog_Carries_p90"])
                     c2.metric("Carries Final Third", p["Carries_Final_Third_p90"])
-                    c3.metric("Carries into Box", p["Carries_Pen_Area_p90"])
+                    st.metric("Carries into Box", p["Carries_Pen_Area_p90"])
                 with tab4:
-                    c1,c2,c3 = st.columns(3)
+                    c1,c2 = st.columns(2)
                     c1.metric("Tackles", p["Tackles_p90"])
                     c2.metric("Interceptions", p["Interceptions_p90"])
-                    c3.metric("Blocks", p["Blocks_p90"])
+                    st.metric("Blocks", p["Blocks_p90"])

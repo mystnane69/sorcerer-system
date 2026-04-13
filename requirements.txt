@@ -1,9 +1,10 @@
-streamlit==1.35.0
+streamlit==1.32.0
 pandas==2.2.2
 plotly==5.22.0
 numpy==1.26.4
 requests==2.32.3
-soccerdata==1.5.1
 scikit-learn==1.5.0
 lxml>=4.6,<5.0
 beautifulsoup4==4.12.3
+html5lib==1.1
+
